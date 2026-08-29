@@ -24,12 +24,15 @@ if not os.path.exists(MODEL_PATH):
     urllib.request.urlretrieve(MODEL_URL, MODEL_PATH)
 
 # Initialize the hand landmarker
-base_options = mp_python.BaseOptions(model_asset_path = MODEL_PATH)
+base_options = mp_python.BaseOptions(
+    model_asset_path=MODEL_PATH,
+    delegate=mp_python.BaseOptions.Delegate.CPU,)
+
 options = vision.HandLandmarkerOptions(
     #we can set the number of hands to detect here
     base_options=base_options,
     num_hands=2,
-    running_mode=vision.RunningMode.VIDEO,
+    running_mode=vision.RunningMode.IMAGE,
 )
 
 # Initialize the hand landmarker
@@ -179,6 +182,42 @@ def main():
         cv2.waitKey(1)
     detector.close()
 
+# ------------- Merging with the interface ------------------
+_prev_y_state = {"Left": None, "Right": None}
 
-if __name__ == "__main__":
-    main()
+def get_hand_state(frame):
+    frame_h, frame_w = frame.shape[:2]
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+    result = detector.detect(mp_image)
+    state = {
+        "left_hand":  {"x": None, "y": None, "moving_down": False, "present": False, "landmarks": []},
+        "right_hand": {"x": None, "y": None, "moving_down": False, "present": False, "landmarks": []},
+    }
+
+    if result.hand_landmarks:
+        for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
+            label = handedness[0].category_name
+            wrist = hand_landmarks[0]
+            px, py = int(wrist.x * frame_w), int(wrist.y * frame_h)
+
+            # collect pixel coordinates for ALL 21 landmarks (fingertips, joints, wrist)
+            landmark_points = [
+                (int(lm.x * frame_w), int(lm.y * frame_h)) for lm in hand_landmarks
+            ]
+
+            moving_down = False
+            prev_y = _prev_y_state[label]
+            if prev_y is not None and (wrist.y - prev_y) > 0.005:
+                moving_down = True
+            _prev_y_state[label] = wrist.y
+
+            key = "left_hand" if label == "Left" else "right_hand"
+            state[key] = {
+                "x": px, "y": py,
+                "moving_down": moving_down,
+                "present": True,
+                "landmarks": landmark_points,
+            }
+
+    return state
