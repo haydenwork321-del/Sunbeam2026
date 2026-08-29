@@ -104,6 +104,12 @@ def cv2_frame_to_pygame_surface(frame):
     surface = pygame.surfarray.make_surface(frame_rgb)
     return surface
 
+def get_hand_state(frame):
+    return {
+        "left_hand":  {"x": 400, "y": 300, "moving_down": True},
+        "right_hand": {"x": 800, "y": 300, "moving_down": True},
+    }
+
 while running:
     ret, frame = cap.read() #reading the next frame from the webcam
     if not ret: # Create fallback to prevent crashing
