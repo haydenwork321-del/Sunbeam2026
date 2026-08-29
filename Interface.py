@@ -60,16 +60,19 @@ def scale_pos(x, y):
     """Scale an (x, y) position from the design resolution to the real screen."""
     return scale_val(x), scale_val(y)
 
-
-pygame.display.set_caption("Smach the Perfect Day")
+# Set the caption to the name
+pygame.display.set_caption("SmachBash")
 running = True
 
 #------------------- Set up graphics -------------------#
 # Music beats
 BPM = 115
 seconds_per_beat = 60 / BPM
-NUM_BEATS = 500
+NUM_BEATS = 10
 beat_times = [i * seconds_per_beat for i in range(1, NUM_BEATS + 1) if i % 2 == 0]
+# This is the beat to time
+
+# This is to setup the beatbase spawn for the falling images/ objects
 spawned_indices = set()
 elapsed_ms = 0
 
@@ -78,9 +81,8 @@ elapsed_ms = 0
 OBJ_SIZE = scale_val(150)
 OBJ_HALF = OBJ_SIZE // 2
 
-
+# The function for starting the music, we chose uptown funk, heavier beats
 def start_music():
-
 
     # Load your music file
     pygame.mixer.music.load("uptownfunk.mp3")
@@ -134,18 +136,24 @@ shaqmeme_image = pygame.transform.scale(shaqmeme_image, (OBJ_SIZE, OBJ_SIZE))
 sideyedogmeme_image = pygame.image.load("images/sideyedogmeme.png")
 sideyedogmeme_image = pygame.transform.scale(sideyedogmeme_image, (OBJ_SIZE, OBJ_SIZE))
 
+# Created the list of images so they can be use as falling objects, also for random selection
 object_images = [
     hamburger_image, image_2, image_3, image_4, image_5,
     dogmeme_image, donkeymeme_image, monkeymeme_image, shaqmeme_image, sideyedogmeme_image,
 ]
 
 # Heart/ Lives
+# I had to use two pngs because the opencv/ the webcam does not accept gif
+# also I have to manually animate the heart by switching between the two
 heart_images = [
     pygame.image.load("images/heart_frame1.png"),
     pygame.image.load("images/heart_frame2.png"),
 ]
-heart_images = [pygame.transform.scale(img, (scale_val(40), scale_val(40))) for img in heart_images]
 
+# This is rescaling 
+heart_images = [pygame.transform.scale(image, (scale_val(40), scale_val(40))) for image in heart_images]
+
+# Setting the animation frame and timer
 current_frame = 0
 frame_timer = 0
 clock = pygame.time.Clock()
@@ -155,6 +163,7 @@ lives = 5
 
 # "Never give up" revival: when lives hit 0, instead of ending the game, we
 # grant one extra life and show an encouraging message for a couple seconds.
+# We also want to match this with the "perfect day" theme so player never dies
 revive_message_until = 0  # pygame.time.get_ticks() value; show message while now < this
 REVIVE_MESSAGE_DURATION_MS = 3000
 
@@ -204,15 +213,14 @@ DETECTION_ZONES = [
 ]
 
 # Vertical boundary past which a falling object counts as "missed". Based on
-# the drums' position, not the raw screen height — on a fullscreen display
-# much taller than the 810px design height, using the real screen bottom left
+# the drums' position, not the raw screen height using the real screen bottom left
 # a long stretch of empty space below the drums for objects to keep falling
-# through with nothing on screen, which looked like the object had frozen
-# instead of disappearing.
+# through with nothing on screen
 MISS_MARGIN = scale_val(150)
 MISS_Y = max(zone.bottom for zone in DRUM_ZONES) + MISS_MARGIN
 
-
+# This function is to spawn the objects image out, I also
+# used random choice to make it so they appear in random order
 def spawn_object():
     global spawn_count
     x_positions = [scale_val(100), scale_val(1250)]
@@ -221,36 +229,38 @@ def spawn_object():
     falling_objects.append({
         "x": spawn_x,
         "y": -OBJ_SIZE,
-        "image": chosen_image,
+        "image": chosen_image, # any chosen object image from the list
     })
-    spawn_count += 1
+
+    spawn_count += 1 # This is to keep track of how many spwans happened
 
 
 # Setting up the webcam
 cap = cv2.VideoCapture(0)
 
-
+# This function is to convert the cv2 frame to display on screen
 def cv2_frame_to_pygame_surface(frame):
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame_rgb = np.rot90(frame_rgb)
     surface = pygame.surfarray.make_surface(frame_rgb)
     return surface
 
-
+# The loop for the game, so it keeps running until user quits
 while running:
     ret, frame = cap.read()
     if not ret:
         break
 
+    # This is to get the hand state from the file that my friend wrote
     hand_state = HandCV.get_hand_state(frame)
 
-    orig_h, orig_w = frame.shape[:2]  # capture ORIGINAL camera size before resizing
+    orig_height, orig_width = frame.shape[:2]  # capture ORIGINAL camera size before resizing
 
     frame = cv2.resize(frame, (WIDTH, HEIGHT))
 
     # --- draw hand markers (debug: big red circles) ---
-    scale_x = WIDTH / orig_w
-    scale_y = HEIGHT / orig_h
+    scale_x = WIDTH / orig_width
+    scale_y = HEIGHT / orig_height
 
     for hand_key in ["left_hand", "right_hand"]:
         hand = hand_state[hand_key]
