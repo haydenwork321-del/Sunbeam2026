@@ -20,6 +20,15 @@ import random
 import HandCV
 
 pygame.init()
+pygame.mixer.init()
+
+try:
+    pygame.mixer.music.load("uptownfunk.mp3")
+    pygame.mixer.music.play(-1)  # Plays in the background
+except pygame.error as event:  
+    print(f"Error loading music: {event}")
+
+
 
 # The game was designed at this resolution — every fixed pixel value below
 # (image sizes, drum positions, spawn x's, HUD placement) is scaled relative
@@ -68,6 +77,23 @@ elapsed_ms = 0
 # object image and to compute their centers consistently everywhere below.
 OBJ_SIZE = scale_val(150)
 OBJ_HALF = OBJ_SIZE // 2
+
+
+def start_music():
+
+
+    # Load your music file
+    pygame.mixer.music.load("uptownfunk.mp3")
+
+
+    # Play the music (-1 means loop indefinitely)
+    pygame.mixer.music.play(-1)
+
+
+    # Keep the program running so the music can be heard
+    while pygame.mixer.music.get_busy():
+        time.sleep(1)
+
 
 # Load the image
 roundDrums1_image = pygame.image.load("images/roundDrums.png")
@@ -284,6 +310,7 @@ while running:
                 continue
 
             obj["hit"] = True
+            
             score += 1
             break
 
