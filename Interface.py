@@ -20,8 +20,32 @@ import random
 import HandCV
 
 pygame.init()
-WIDTH, HEIGHT = 1470, 810
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
+
+# The game was designed at this resolution — every fixed pixel value below
+# (image sizes, drum positions, spawn x's, HUD placement) is scaled relative
+# to it, so the layout looks proportionally the same on any screen size.
+BASE_WIDTH, BASE_HEIGHT = 1470, 810
+
+_display_info = pygame.display.Info()
+WIDTH, HEIGHT = _display_info.current_w, _display_info.current_h
+
+# Uniform scale factor: keeps images/spacing proportional (no stretching).
+# Whichever axis is more constrained relative to the base design sets the
+# scale, so nothing overflows the screen on very wide/narrow/tall monitors.
+UI_SCALE = min(WIDTH / BASE_WIDTH, HEIGHT / BASE_HEIGHT)
+
+
+def scale_val(v):
+    """Scale a single length (in design-resolution px) to the real screen."""
+    return int(v * UI_SCALE)
+
+
+def scale_pos(x, y):
+    """Scale an (x, y) position from the design resolution to the real screen."""
+    return scale_val(x), scale_val(y)
+
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 pygame.display.set_caption("Smach the Perfect Day")
 running = True
 
@@ -34,29 +58,34 @@ beat_times = [i * seconds_per_beat for i in range(1, NUM_BEATS + 1) if i % 2 == 
 spawned_indices = set()
 elapsed_ms = 0
 
+# Object sprite size at the design resolution — used to scale every falling
+# object image and to compute their centers consistently everywhere below.
+OBJ_SIZE = scale_val(150)
+OBJ_HALF = OBJ_SIZE // 2
+
 # Load the image
 roundDrums1_image = pygame.image.load("images/roundDrums.png")
-roundDrums1_image = pygame.transform.scale(roundDrums1_image, (400, 400))
-roundDrums1_x, roundDrums1_y = 0, 450
+roundDrums1_image = pygame.transform.scale(roundDrums1_image, (scale_val(400), scale_val(400)))
+roundDrums1_x, roundDrums1_y = scale_pos(0, 450)
 
 roundDrums2_image = pygame.image.load("images/roundDrums.png")
-roundDrums2_image = pygame.transform.scale(roundDrums2_image, (400, 400))
-roundDrums2_x, roundDrums2_y = 1060, 450
+roundDrums2_image = pygame.transform.scale(roundDrums2_image, (scale_val(400), scale_val(400)))
+roundDrums2_x, roundDrums2_y = scale_pos(1060, 450)
 
 hamburger_image = pygame.image.load("images/hamburger.png")
-hamburger_image = pygame.transform.scale(hamburger_image, (150, 150))
+hamburger_image = pygame.transform.scale(hamburger_image, (OBJ_SIZE, OBJ_SIZE))
 
 image_2 = pygame.image.load("images/pizza.png")
-image_2 = pygame.transform.scale(image_2, (150, 150))
+image_2 = pygame.transform.scale(image_2, (OBJ_SIZE, OBJ_SIZE))
 
 image_3 = pygame.image.load("images/cat.png")
-image_3 = pygame.transform.scale(image_3, (150, 150))
+image_3 = pygame.transform.scale(image_3, (OBJ_SIZE, OBJ_SIZE))
 
 image_4 = pygame.image.load("images/dog.png")
-image_4 = pygame.transform.scale(image_4, (150, 150))
+image_4 = pygame.transform.scale(image_4, (OBJ_SIZE, OBJ_SIZE))
 
 image_5 = pygame.image.load("images/nintendo.png")
-image_5 = pygame.transform.scale(image_5, (200, 150))
+image_5 = pygame.transform.scale(image_5, (scale_val(200), OBJ_SIZE))
 
 object_images = [hamburger_image, image_2, image_3, image_4, image_5]
 
@@ -65,7 +94,7 @@ heart_images = [
     pygame.image.load("images/heart_frame1.png"),
     pygame.image.load("images/heart_frame2.png"),
 ]
-heart_images = [pygame.transform.scale(img, (40, 40)) for img in heart_images]
+heart_images = [pygame.transform.scale(img, (scale_val(40), scale_val(40))) for img in heart_images]
 
 current_frame = 0
 frame_timer = 0
@@ -76,30 +105,43 @@ lives = 5
 
 # Score tracking
 score = 0
-font = pygame.font.SysFont(None, 60)
+font = pygame.font.SysFont(None, scale_val(60))
 
 # Listing out the falling objects
 falling_objects = []
-FALL_SPEED = 30
+FALL_SPEED = scale_val(30)
 spawn_count = 0
-HIT_RADIUS = 100  # how close a hand needs to be to an object to count as a hit
+HIT_RADIUS = scale_val(100)  # unused by the current zone-based check, kept for reference
 
-# Drum hit zones — a hit only counts if the object AND the hand are both
-# inside the same drum's rectangle (matches the visible drum image area)
+# Drum hit zones — matches the visible drum image area (used for drawing)
 DRUM_ZONES = [
-    pygame.Rect(roundDrums1_x, roundDrums1_y, 400, 400),  # left drum
-    pygame.Rect(roundDrums2_x, roundDrums2_y, 400, 400),  # right drum
+    pygame.Rect(roundDrums1_x, roundDrums1_y, scale_val(400), scale_val(400)),  # left drum
+    pygame.Rect(roundDrums2_x, roundDrums2_y, scale_val(400), scale_val(400)),  # right drum
+]
+
+# Detection zones — same drums, but padded outward so the hit check has a much
+# wider, more forgiving column/top-edge than the exact drum artwork. Used only
+# for collision checks, not for drawing.
+DETECTION_MARGIN = scale_val(120)  # extra room added on every side of each drum
+DETECTION_ZONES = [
+    pygame.Rect(
+        zone.left - DETECTION_MARGIN,
+        zone.top - DETECTION_MARGIN,
+        zone.width + 2 * DETECTION_MARGIN,
+        zone.height + 2 * DETECTION_MARGIN,
+    )
+    for zone in DRUM_ZONES
 ]
 
 
 def spawn_object():
     global spawn_count
-    x_positions = [100, 1250]
+    x_positions = [scale_val(100), scale_val(1250)]
     spawn_x = x_positions[spawn_count % 2]
     chosen_image = random.choice(object_images)
     falling_objects.append({
         "x": spawn_x,
-        "y": -200,
+        "y": -OBJ_SIZE,
         "image": chosen_image,
     })
     spawn_count += 1
@@ -155,7 +197,7 @@ while running:
     heart_image = heart_images[current_frame]
 
     for index in range(lives):
-        screen.blit(heart_image, (10 + index * 40, 0))
+        screen.blit(heart_image, (scale_val(10) + index * scale_val(40), 0))
 
     # ----------------------- Falling objects ----------------------- #
     elapsed_ms += clock.get_time()
@@ -169,21 +211,29 @@ while running:
     for obj in falling_objects:
         obj["y"] += FALL_SPEED
 
-    # --- collision check: hit only counts inside a drum zone ---
+    # --- collision check: hit only counts on the drums ---
+    # An object is "on" a drum once it's in that drum's horizontal column
+    # AND has fallen at/past the drum's top edge (its y coordinate).
+    # A hit needs a hand in that same column, also at/past that same top
+    # edge, moving down — no distance/radius math needed.
     for obj in falling_objects:
         if obj.get("hit"):
             continue
-        obj_center_x = obj["x"] + 75  # objects are 150x150, so center is +75
-        obj_center_y = obj["y"] + 75
+        obj_center_x = obj["x"] + OBJ_HALF
+        obj_center_y = obj["y"] + OBJ_HALF
 
-        # which drum zone (if any) is this object currently inside?
+        # which drum column (if any) does this object line up with?
         obj_zone = None
-        for zone in DRUM_ZONES:
-            if zone.collidepoint(obj_center_x, obj_center_y):
+        for zone in DETECTION_ZONES:
+            if zone.left <= obj_center_x <= zone.right:
                 obj_zone = zone
                 break
         if obj_zone is None:
-            continue  # object hasn't reached a drum yet, can't be hit
+            continue  # object isn't over a drum, can't be hit
+
+        # object must have reached the drum's top edge
+        if obj_center_y < obj_zone.top:
+            continue
 
         for hand_key in ["left_hand", "right_hand"]:
             hand = hand_state[hand_key]
@@ -192,15 +242,15 @@ while running:
             hx = int(hand["x"] * scale_x)
             hy = int(hand["y"] * scale_y)
 
-            # hand must ALSO be inside that same drum zone
-            if not obj_zone.collidepoint(hx, hy):
+            # hand must be in the same drum column and at/past its top edge
+            if not (obj_zone.left <= hx <= obj_zone.right):
+                continue
+            if hy < obj_zone.top:
                 continue
 
-            distance = ((hx - obj_center_x) ** 2 + (hy - obj_center_y) ** 2) ** 0.5
-            if distance < HIT_RADIUS:
-                obj["hit"] = True
-                score += 1
-                break
+            obj["hit"] = True
+            score += 1
+            break
 
     # remove hit objects immediately; remove missed ones that fell off-screen (lose a life)
     still_falling = []
@@ -218,7 +268,7 @@ while running:
 
     # --- score display ---
     score_text = font.render(f"Score: {score}", True, (255, 255, 255))
-    screen.blit(score_text, (WIDTH - 220, 20))
+    screen.blit(score_text, (WIDTH - scale_val(220), scale_val(20)))
 
     pygame.display.flip()
     clock.tick(30)

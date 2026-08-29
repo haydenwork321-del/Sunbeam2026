@@ -3,6 +3,7 @@ import time
 import os
 import threading
 import urllib.request
+from collections import deque
 import cv2
 import mediapipe as mp
 from mediapipe.tasks import python as mp_python
@@ -47,6 +48,11 @@ HAND_CONNECTIONS = [
     (13, 17), (17, 18), (18, 19), (19, 20),
     (0, 17),
 ]
+
+# Fingertip landmark indices (thumb, index, middle, ring, pinky tips).
+# We use the centroid of these as the "contact point" for hit detection,
+# since a smash/swipe motion leads with the fingers, not the wrist.
+FINGERTIP_IDS = [4, 8, 12, 16, 20]
 
 
 # Separate tracking for each hand so a left-hand swipe never affects the right hand's state.
@@ -111,16 +117,6 @@ def click_left(wrist_y):
     if delta_y > MOVE_THRESHOLD and (now - last_left_click_time) > CLICK_COOLDOWN:
         last_left_click_time = now
         threading.Thread(target=show_click_dialog, args=("Left",), daemon=True).start()
-    prev_right_wrist_y = wrist_y
-
-    if prev_y is None:
-        return  # first frame we've seen this hand, nothing to compare yet
-
-    delta_y = wrist_y - prev_y  # positive = moved DOWN (y grows downward in image coords)
-
-    if delta_y > MOVE_THRESHOLD and (now - last_right_click_time) > CLICK_COOLDOWN:
-        last_left_click_time = now
-        threading.Thread(target=show_click_dialog, args=("Left",), daemon=True).start()
 
 
 cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
@@ -183,7 +179,16 @@ def main():
     detector.close()
 
 # ------------- Merging with the interface ------------------
-_prev_y_state = {"Left": None, "Right": None}
+# Rolling window of recent fingertip-centroid y positions per hand, used to
+# detect a downward swipe as a net trend rather than a single-frame delta.
+# A single-frame comparison is fragile: detection jitter or a slow inference
+# call on any one frame can make an in-progress swipe register as "not
+# moving" even while the hand is clearly heading down. Looking at the net
+# change over the last few detections smooths that out.
+_Y_HISTORY_LEN = 5
+_y_history = {"Left": deque(maxlen=_Y_HISTORY_LEN), "Right": deque(maxlen=_Y_HISTORY_LEN)}
+MOVE_DOWN_THRESHOLD = 0.015  # net normalized downward movement over the window to count as a swipe
+
 
 def get_hand_state(frame):
     frame_h, frame_w = frame.shape[:2]
@@ -195,22 +200,30 @@ def get_hand_state(frame):
         "right_hand": {"x": None, "y": None, "moving_down": False, "present": False, "landmarks": []},
     }
 
+    seen_labels = set()
+
     if result.hand_landmarks:
         for hand_landmarks, handedness in zip(result.hand_landmarks, result.handedness):
             label = handedness[0].category_name
-            wrist = hand_landmarks[0]
-            px, py = int(wrist.x * frame_w), int(wrist.y * frame_h)
+            seen_labels.add(label)
+
+            # Contact point = centroid of the fingertips, not the wrist.
+            # A smash/swipe leads with the fingers, so this point tracks much
+            # closer to where the hand actually meets the falling object.
+            tip_x = sum(hand_landmarks[i].x for i in FINGERTIP_IDS) / len(FINGERTIP_IDS)
+            tip_y = sum(hand_landmarks[i].y for i in FINGERTIP_IDS) / len(FINGERTIP_IDS)
+            px, py = int(tip_x * frame_w), int(tip_y * frame_h)
 
             # collect pixel coordinates for ALL 21 landmarks (fingertips, joints, wrist)
             landmark_points = [
                 (int(lm.x * frame_w), int(lm.y * frame_h)) for lm in hand_landmarks
             ]
 
-            moving_down = False
-            prev_y = _prev_y_state[label]
-            if prev_y is not None and (wrist.y - prev_y) > 0.005:
-                moving_down = True
-            _prev_y_state[label] = wrist.y
+            history = _y_history[label]
+            history.append(tip_y)
+
+            # Net movement from the oldest to newest sample in the window.
+            moving_down = len(history) >= 2 and (history[-1] - history[0]) > MOVE_DOWN_THRESHOLD
 
             key = "left_hand" if label == "Left" else "right_hand"
             state[key] = {
@@ -219,5 +232,11 @@ def get_hand_state(frame):
                 "present": True,
                 "landmarks": landmark_points,
             }
+
+    # Clear history for any hand that dropped out of frame this call, so a
+    # gap in detection can't be misread as movement once it reappears.
+    for label in ("Left", "Right"):
+        if label not in seen_labels:
+            _y_history[label].clear()
 
     return state
