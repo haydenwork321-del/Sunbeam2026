@@ -50,12 +50,12 @@ WIDTH, HEIGHT = screen.get_size()
 # scale, so nothing overflows the screen on very wide/narrow/tall monitors.
 UI_SCALE = min(WIDTH / BASE_WIDTH, HEIGHT / BASE_HEIGHT)
 
-
+# This function is so that the screen size will fix globally to all computer 
 def scale_val(v):
     """Scale a single length (in design-resolution px) to the real screen."""
-    return int(v * UI_SCALE)
+    return int(v * UI_SCALE) # THe UI_SCALE is the global scale
 
-
+# This finds the global position of the screen 
 def scale_pos(x, y):
     """Scale an (x, y) position from the design resolution to the real screen."""
     return scale_val(x), scale_val(y)
@@ -68,7 +68,7 @@ running = True
 # Music beats
 BPM = 115
 seconds_per_beat = 60 / BPM
-NUM_BEATS = 100
+NUM_BEATS = 500
 beat_times = [i * seconds_per_beat for i in range(1, NUM_BEATS + 1) if i % 2 == 0]
 spawned_indices = set()
 elapsed_ms = 0
@@ -119,7 +119,25 @@ image_4 = pygame.transform.scale(image_4, (OBJ_SIZE, OBJ_SIZE))
 image_5 = pygame.image.load("images/nintendo.png")
 image_5 = pygame.transform.scale(image_5, (scale_val(200), OBJ_SIZE))
 
-object_images = [hamburger_image, image_2, image_3, image_4, image_5]
+dogmeme_image = pygame.image.load("images/dogmeme.png")
+dogmeme_image = pygame.transform.scale(dogmeme_image, (OBJ_SIZE, OBJ_SIZE))
+
+donkeymeme_image = pygame.image.load("images/donkeymeme.png")
+donkeymeme_image = pygame.transform.scale(donkeymeme_image, (OBJ_SIZE, OBJ_SIZE))
+
+monkeymeme_image = pygame.image.load("images/monkeymeme.png")
+monkeymeme_image = pygame.transform.scale(monkeymeme_image, (OBJ_SIZE, OBJ_SIZE))
+
+shaqmeme_image = pygame.image.load("images/shaqmeme.png")
+shaqmeme_image = pygame.transform.scale(shaqmeme_image, (OBJ_SIZE, OBJ_SIZE))
+
+sideyedogmeme_image = pygame.image.load("images/sideyedogmeme.png")
+sideyedogmeme_image = pygame.transform.scale(sideyedogmeme_image, (OBJ_SIZE, OBJ_SIZE))
+
+object_images = [
+    hamburger_image, image_2, image_3, image_4, image_5,
+    dogmeme_image, donkeymeme_image, monkeymeme_image, shaqmeme_image, sideyedogmeme_image,
+]
 
 # Heart/ Lives
 heart_images = [
