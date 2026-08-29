@@ -26,8 +26,15 @@ pygame.init()
 # to it, so the layout looks proportionally the same on any screen size.
 BASE_WIDTH, BASE_HEIGHT = 1470, 810
 
-_display_info = pygame.display.Info()
-WIDTH, HEIGHT = _display_info.current_w, _display_info.current_h
+# Let SDL pick the native fullscreen resolution itself (size (0, 0) means
+# "use the current display mode"), then read the REAL surface size back.
+# Querying pygame.display.Info() before creating the window and trusting
+# that size can mismatch what SDL actually allocates once FULLSCREEN is
+# applied on some systems/multi-monitor setups — anything positioned near an
+# edge using that stale size (like a corner button) can end up drawn outside
+# the real visible surface.
+screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
+WIDTH, HEIGHT = screen.get_size()
 
 # Uniform scale factor: keeps images/spacing proportional (no stretching).
 # Whichever axis is more constrained relative to the base design sets the
@@ -45,7 +52,6 @@ def scale_pos(x, y):
     return scale_val(x), scale_val(y)
 
 
-screen = pygame.display.set_mode((WIDTH, HEIGHT), pygame.FULLSCREEN)
 pygame.display.set_caption("Smach the Perfect Day")
 running = True
 
@@ -103,9 +109,22 @@ clock = pygame.time.Clock()
 # Create five of them
 lives = 5
 
+# "Never give up" revival: when lives hit 0, instead of ending the game, we
+# grant one extra life and show an encouraging message for a couple seconds.
+revive_message_until = 0  # pygame.time.get_ticks() value; show message while now < this
+REVIVE_MESSAGE_DURATION_MS = 3000
+
 # Score tracking
 score = 0
 font = pygame.font.SysFont(None, scale_val(60))
+
+# Visible quit button (in addition to the Esc key) — a small clickable
+# image drawn in the bottom-right corner, since fullscreen mode has no
+# window chrome/close button. Offset slightly from the corner (not pinned to
+# the exact edge) so it isn't clipped by any OS overlay reserved along the screen edge.
+QUIT_BUTTON_RECT = pygame.Rect(WIDTH - scale_val(170), HEIGHT - scale_val(70), scale_val(150), scale_val(55))
+quit_button_image = pygame.image.load("images/quit.png")
+quit_button_image = pygame.transform.scale(quit_button_image, (QUIT_BUTTON_RECT.width, QUIT_BUTTON_RECT.height))
 
 # Listing out the falling objects
 falling_objects = []
@@ -119,19 +138,35 @@ DRUM_ZONES = [
     pygame.Rect(roundDrums2_x, roundDrums2_y, scale_val(400), scale_val(400)),  # right drum
 ]
 
-# Detection zones — same drums, but padded outward so the hit check has a much
-# wider, more forgiving column/top-edge than the exact drum artwork. Used only
-# for collision checks, not for drawing.
-DETECTION_MARGIN = scale_val(120)  # extra room added on every side of each drum
+# Detection zones — same drums, but padded outward so the hit check has a
+# wider, more forgiving column than the exact drum artwork. Used only for
+# collision checks, not for drawing.
+# Horizontal and vertical margins are separate: the horizontal one keeps
+# column detection forgiving (you don't need pixel-perfect left/right
+# aim), while the vertical one controls how big a y-range counts as "on
+# the drum" — kept much smaller so a hit only registers when the object
+# and hand are actually close together vertically, instead of anywhere in
+# a tall column.
+DETECTION_MARGIN_X = scale_val(220)  # extra room added left/right of each drum
+DETECTION_MARGIN_Y = scale_val(140)  # extra room added top/bottom of each drum
 DETECTION_ZONES = [
     pygame.Rect(
-        zone.left - DETECTION_MARGIN,
-        zone.top - DETECTION_MARGIN,
-        zone.width + 2 * DETECTION_MARGIN,
-        zone.height + 2 * DETECTION_MARGIN,
+        zone.left - DETECTION_MARGIN_X,
+        zone.top - DETECTION_MARGIN_Y,
+        zone.width + 2 * DETECTION_MARGIN_X,
+        zone.height + 2 * DETECTION_MARGIN_Y,
     )
     for zone in DRUM_ZONES
 ]
+
+# Vertical boundary past which a falling object counts as "missed". Based on
+# the drums' position, not the raw screen height — on a fullscreen display
+# much taller than the 810px design height, using the real screen bottom left
+# a long stretch of empty space below the drums for objects to keep falling
+# through with nothing on screen, which looked like the object had frozen
+# instead of disappearing.
+MISS_MARGIN = scale_val(150)
+MISS_Y = max(zone.bottom for zone in DRUM_ZONES) + MISS_MARGIN
 
 
 def spawn_object():
@@ -253,15 +288,26 @@ while running:
             break
 
     # remove hit objects immediately; remove missed ones that fell off-screen (lose a life)
+    # This list is fully rebuilt every frame from scratch (still_falling), and
+    # only what ends up in still_falling gets drawn below — so any object
+    # that was hit, or passed MISS_Y, is excluded here and simply never
+    # blitted again. There's no separate "erase" step needed; it vanishes
+    # because it's no longer in the list being drawn.
     still_falling = []
     for obj in falling_objects:
         if obj.get("hit"):
             continue  # disappears immediately on hit
-        if obj["y"] >= HEIGHT:
+        if obj["y"] >= MISS_Y:
             lives -= 1
             continue  # missed, slides off, lose a life
         still_falling.append(obj)
     falling_objects = still_falling
+
+    # "Never give up" revival — if the player just ran out of lives, grant one
+    # back and show an encouraging message instead of the game simply ending.
+    if lives <= 0:
+        lives = 5
+        revive_message_until = pygame.time.get_ticks() + REVIVE_MESSAGE_DURATION_MS
 
     for obj in falling_objects:
         screen.blit(obj["image"], (obj["x"], obj["y"]))
@@ -270,12 +316,38 @@ while running:
     score_text = font.render(f"Score: {score}", True, (255, 255, 255))
     screen.blit(score_text, (WIDTH - scale_val(220), scale_val(20)))
 
+    # --- "never give up" revival popup ---
+    if pygame.time.get_ticks() < revive_message_until:
+        popup_font = pygame.font.SysFont(None, scale_val(70))
+        line1 = popup_font.render("Never give up!", True, (255, 215, 0))
+        line2 = popup_font.render("+5 Lives", True, (255, 80, 80))
+
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        screen.blit(overlay, (0, 0))
+
+        line1_rect = line1.get_rect(center=(WIDTH // 2, HEIGHT // 2 - scale_val(40)))
+        line2_rect = line2.get_rect(center=(WIDTH // 2, HEIGHT // 2 + scale_val(30)))
+        screen.blit(line1, line1_rect)
+        screen.blit(line2, line2_rect)
+
+    # --- quit button (drawn last so it's always on top and clickable) ---
+    screen.blit(quit_button_image, QUIT_BUTTON_RECT.topleft)
+
     pygame.display.flip()
     clock.tick(30)
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
+        elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if QUIT_BUTTON_RECT.collidepoint(event.pos):
+                running = False
+            elif pygame.time.get_ticks() < revive_message_until:
+                # any other click while the popup is showing dismisses it early
+                revive_message_until = 0
 
 cap.release()
 pygame.quit()
